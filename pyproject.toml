@@ -1,0 +1,17 @@
+[project]
+name = "booking-opera"
+version = "0.1.0"
+description = "Conciliação headless Booking x OPERA para GitHub Actions"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "drissionpage==4.1.1.4",
+    "openpyxl>=3.1.5,<4",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
