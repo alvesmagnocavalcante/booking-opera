@@ -4,13 +4,24 @@ from threading import Event
 from time import monotonic
 
 from automations.booking_domain import (
+    REPORT_HEADERS,
     compare_records,
     consolidate_grouped_record,
+    final_report_record,
     notify,
     source_columns,
 )
-from automations.booking_models import BookingConfig, BookingDependencies, BookingResult, Progress
-from automations.booking_reports import save_report_csv, save_report_excel, write_booking_csv
+from automations.booking_models import (
+    BookingConfig,
+    BookingDependencies,
+    BookingResult,
+    Progress,
+)
+from automations.booking_reports import (
+    save_report_csv,
+    save_report_excel,
+    write_booking_csv,
+)
 
 
 class BookingReconciliationService:
@@ -19,7 +30,12 @@ class BookingReconciliationService:
     def __init__(self, dependencies: BookingDependencies) -> None:
         self._dependencies = dependencies
 
-    def run(self, config: BookingConfig, progress: Progress | None = None, cancel: Event | None = None) -> BookingResult:
+    def run(
+        self,
+        config: BookingConfig,
+        progress: Progress | None = None,
+        cancel: Event | None = None,
+    ) -> BookingResult:
         config.validate()
         config.output_dir.mkdir(parents=True, exist_ok=True)
         booking_csv = config.output_dir / "reservas_booking.csv"
@@ -40,15 +56,9 @@ class BookingReconciliationService:
             columns = source_columns(headers)
             for record in records:
                 consolidate_grouped_record(record, columns)
-            report_headers = [
-                *headers,
-                "Itens agrupados",
-                "Valor Booking calculado",
-                "Valor OPERA",
-                "Diferença",
-                "Conferência",
-            ]
-            notify(progress, f"{len(records)} reservas extraídas; abrindo o OPERA", 0.25)
+            notify(
+                progress, f"{len(records)} reservas extraídas; abrindo o OPERA", 0.25
+            )
             opera_browser = self._dependencies.browser_factory()
             tab = self._dependencies.opera_login(opera_browser, config, cancel)
             notify(progress, f"Selecionando hotel/resort: {config.hotel_name}", 0.28)
@@ -63,19 +73,23 @@ class BookingReconciliationService:
                 now = monotonic()
                 if now - last_checkpoint < 5:
                     return
-                save_report_csv(report_csv, report_headers, current)
+                report = [final_report_record(record, columns) for record in current]
+                save_report_csv(report_csv, REPORT_HEADERS, report)
                 last_checkpoint = now
 
             compare_records(
                 records,
                 columns,
-                total_lookup=lambda reservation: self._dependencies.total_reader(tab, reservation, cancel),
+                total_lookup=lambda reservation: self._dependencies.total_reader(
+                    tab, reservation, cancel
+                ),
                 progress=progress,
                 cancel=cancel,
                 after_record=save_checkpoint,
             )
-            save_report_csv(report_csv, report_headers, records)
-            save_report_excel(report_excel, report_headers, records)
+            report = [final_report_record(record, columns) for record in records]
+            save_report_csv(report_csv, REPORT_HEADERS, report)
+            save_report_excel(report_excel, REPORT_HEADERS, report)
             notify(progress, "Conferência concluída", 1.0)
             return BookingResult(tuple(records), booking_csv, report_csv, report_excel)
         finally:

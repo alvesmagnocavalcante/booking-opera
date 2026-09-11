@@ -2,14 +2,44 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Callable
 from decimal import Decimal, InvalidOperation
 from threading import Event
-from typing import Callable
 
 from automations.booking_models import AutomationCancelled, Progress
 
 COMPLETED_STATUSES = {"ok", "concluida", "completed", "stayed"}
 CURRENCY_PATTERN = re.compile(r"R\$\s*[\d.,]+")
+REPORT_HEADERS = (
+    "Reservation number",
+    "Booked on",
+    "Arrival",
+    "Departure",
+    "Guest name",
+    "Rooms",
+    "Persons",
+    "Room nights",
+    "Commission %",
+    "Original amount",
+    "Final amount",
+    "Commission amount",
+    "Status",
+    "OBSERVAÇÕES",
+)
+MONTHS = {
+    "jan": "01",
+    "fev": "02",
+    "mar": "03",
+    "abr": "04",
+    "mai": "05",
+    "jun": "06",
+    "jul": "07",
+    "ago": "08",
+    "set": "09",
+    "out": "10",
+    "nov": "11",
+    "dez": "12",
+}
 
 
 def notify(progress: Progress | None, message: str, value: float) -> None:
@@ -24,9 +54,11 @@ def checkpoint(cancel: Event | None) -> None:
 
 def normalize(value: object) -> str:
     text = unicodedata.normalize("NFKD", str(value or ""))
-    return "".join(
-        char for char in text if not unicodedata.combining(char)
-    ).casefold().strip()
+    return (
+        "".join(char for char in text if not unicodedata.combining(char))
+        .casefold()
+        .strip()
+    )
 
 
 def normalized_lines(value: object) -> tuple[str, ...]:
@@ -97,11 +129,30 @@ def source_columns(headers: list[str]) -> dict[str, str | None]:
     columns = {
         "reservation": match_header(
             normalized,
-            ("numero da reserva", "book number", "booking number", "reservation number"),
+            (
+                "numero da reserva",
+                "book number",
+                "booking number",
+                "reservation number",
+            ),
         ),
         "guest": match_header(
             normalized,
             ("nome do hospede", "guest name"),
+        ),
+        "booked_on": match_header(
+            normalized, ("reservado em", "data da reserva", "booked on")
+        ),
+        "arrival": match_header(normalized, ("check-in", "check in", "arrival")),
+        "departure": match_header(normalized, ("check-out", "check out", "departure")),
+        "rooms": match_header(normalized, ("quartos", "rooms")),
+        "persons": match_header(
+            normalized, ("pessoas", "hospedes", "guests", "persons")
+        ),
+        "nights": match_header(normalized, ("diarias", "room nights", "nights")),
+        "commission_percent": match_header(
+            normalized,
+            ("comissao %", "commission %", "commission percentage"),
         ),
         "status": match_header(normalized, ("status", "result")),
         "original": match_header(
@@ -138,8 +189,6 @@ def source_columns(headers: list[str]) -> dict[str, str | None]:
 def should_compare(record: dict[str, str], columns: dict[str, str | None]) -> bool:
     raw_status = record[str(columns["status"])]
     statuses = normalized_lines(raw_status)
-    if len(statuses) > 1 and not grouped_under_same_guest(record, columns):
-        return False
     if statuses and all(status in COMPLETED_STATUSES for status in statuses):
         return True
     status = normalize(raw_status)
@@ -170,28 +219,31 @@ def grouped_under_same_guest(
 def calculate_booking_total(
     record: dict[str, str], columns: dict[str, str | None]
 ) -> Decimal:
-    raw_value = record[str(columns["final"])]
-    monetary_values = CURRENCY_PATTERN.findall(str(raw_value or ""))
-    if len(monetary_values) > 1 and not grouped_under_same_guest(record, columns):
-        raise ValueError(
-            "Reserva agrupada contém hóspedes diferentes; valores não somados."
-        )
-    return parse_currency(raw_value)
+    return parse_currency(record[str(columns["final"])])
 
 
 def consolidate_grouped_record(
     record: dict[str, str], columns: dict[str, str | None]
 ) -> bool:
-    """Collapse one Booking row containing repeated entries for the same guest."""
+    """Collapse every item of a grouped Booking reservation into one record."""
 
     guest_key = columns.get("guest")
     guests = normalized_lines(record.get(str(guest_key), "")) if guest_key else ()
-    record["Itens agrupados"] = str(max(len(guests), 1))
-    if not grouped_under_same_guest(record, columns):
+    monetary_keys = {str(columns[key]) for key in ("original", "final", "commission")}
+    group_size = max(
+        len(guests),
+        len(normalized_lines(record.get(str(columns["status"]), ""))),
+        *(
+            len(CURRENCY_PATTERN.findall(str(record.get(key, ""))))
+            for key in monetary_keys
+        ),
+    )
+    record["Itens agrupados"] = str(max(group_size, 1))
+    if group_size <= 1:
         return False
 
-    monetary_keys = {
-        str(columns[key]) for key in ("original", "final", "commission")
+    additive_keys = {
+        str(columns[key]) for key in ("rooms", "persons", "nights") if columns.get(key)
     }
     for key, value in tuple(record.items()):
         lines = [line.strip() for line in str(value or "").splitlines() if line.strip()]
@@ -200,8 +252,104 @@ def consolidate_grouped_record(
         if key in monetary_keys:
             record[key] = format_currency(parse_currency(value))
             continue
+        if key in additive_keys:
+            try:
+                record[key] = str(
+                    sum(Decimal(line.replace(",", ".")) for line in lines)
+                )
+                continue
+            except InvalidOperation:
+                pass
         record[key] = " | ".join(dict.fromkeys(lines))
     return True
+
+
+def source_value(
+    record: dict[str, str], columns: dict[str, str | None], key: str
+) -> str:
+    header = columns.get(key)
+    return str(record.get(header, "")).strip() if header else ""
+
+
+def iso_booking_date(value: str) -> str:
+    normalized = normalize(value)
+    match = re.fullmatch(r"(\d{1,2})o?\s+de\s+([a-z]{3})\.?\s+de\s+(\d{4})", normalized)
+    if not match or match.group(2) not in MONTHS:
+        return value
+    day, month, year = match.groups()
+    return f"{year}-{MONTHS[month]}-{int(day):02d}"
+
+
+def decimal_value(value: str) -> Decimal | str:
+    if not value:
+        return ""
+    try:
+        return parse_currency(value)
+    except ValueError:
+        return value
+
+
+def number_value(value: str) -> Decimal | str:
+    if not value:
+        return ""
+    try:
+        return Decimal(value.replace(",", "."))
+    except InvalidOperation:
+        return value
+
+
+def final_status(record: dict[str, str], columns: dict[str, str | None]) -> str:
+    conference = record.get("Conferência", "PENDENTE")
+    if conference != "NÃO CONFERIDA - REGRA":
+        return conference
+    statuses = normalized_lines(source_value(record, columns, "status"))
+    if statuses and all(
+        any(token in status for token in ("nao comparecimento", "no show", "no_show"))
+        for status in statuses
+    ):
+        return "NO_SHOW"
+    if statuses and all("cancel" in status for status in statuses):
+        return "CANCELLED"
+    return "NÃO_CONFERIDA"
+
+
+def final_report_record(
+    record: dict[str, str], columns: dict[str, str | None]
+) -> dict[str, object]:
+    status = final_status(record, columns)
+    source_status = normalize(source_value(record, columns, "status"))
+    observation = source_value(record, columns, "notes")
+    if status == "OK" and any(
+        token in source_status for token in ("nao comparecimento", "no show", "no_show")
+    ):
+        observation = "NO SHOW" if not observation else f"NO SHOW | {observation}"
+    elif status == "DIVERGENTE":
+        observation = (
+            f"Booking: {record.get('Valor Booking calculado', '')} | "
+            f"OPERA: {record.get('Valor OPERA', '')}"
+        )
+    elif status.startswith("ERRO:"):
+        observation = status.removeprefix("ERRO:").strip()
+        status = "ERRO"
+
+    rooms = source_value(record, columns, "rooms") or record.get("Itens agrupados", "1")
+    values = (
+        source_value(record, columns, "reservation"),
+        source_value(record, columns, "booked_on"),
+        iso_booking_date(source_value(record, columns, "arrival")),
+        iso_booking_date(source_value(record, columns, "departure")),
+        source_value(record, columns, "guest"),
+        number_value(str(rooms)),
+        number_value(source_value(record, columns, "persons")),
+        number_value(source_value(record, columns, "nights")),
+        number_value(source_value(record, columns, "commission_percent")),
+        decimal_value(source_value(record, columns, "original")),
+        decimal_value(source_value(record, columns, "final")),
+        decimal_value(source_value(record, columns, "commission")),
+        status,
+        observation,
+    )
+    return dict(zip(REPORT_HEADERS, values, strict=True))
 
 
 def compare_records(

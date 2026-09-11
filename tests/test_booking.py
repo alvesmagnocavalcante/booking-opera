@@ -249,7 +249,7 @@ class BookingTests(TestCase):
         self.assertEqual(record["Diferença"], "0,00")
         self.assertEqual(record["Conferência"], "OK")
 
-    def test_grouped_reservation_does_not_sum_different_guests(self):
+    def test_grouped_reservation_sums_different_guests(self):
         headers = [
             "Número da reserva",
             "Nome do hóspede",
@@ -270,15 +270,15 @@ class BookingTests(TestCase):
             "",
         ]))
 
-        self.assertFalse(consolidate_grouped_record(record, columns))
+        self.assertTrue(consolidate_grouped_record(record, columns))
         compare_records(
             [record],
             columns,
-            lambda _reservation: self.fail("OPERA não deveria ser consultado"),
+            lambda _reservation: "R$ 300,00",
         )
 
-        self.assertEqual(record["Valor Booking calculado"], "")
-        self.assertEqual(record["Conferência"], "NÃO CONFERIDA - REGRA")
+        self.assertEqual(record["Valor Booking calculado"], "R$ 300,00")
+        self.assertEqual(record["Conferência"], "OK")
 
     def test_comparison_queries_duplicate_reservation_only_once(self):
         headers = [

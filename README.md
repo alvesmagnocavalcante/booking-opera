@@ -51,6 +51,13 @@ Os arquivos gerados em `output/` são:
 - `conferencia_booking_opera.csv`;
 - `conferencia_booking_opera.xlsx`.
 
+O relatório final segue o modelo `Sheet0`, com as colunas `Reservation number`,
+`Booked on`, `Arrival`, `Departure`, `Guest name`, `Rooms`, `Persons`,
+`Room nights`, `Commission %`, valores, `Status` e `OBSERVAÇÕES`. Reservas
+agrupadas têm valores e quantidades somados. Cancelamentos sem cobrança são
+marcados como `CANCELLED`, no-shows sem cobrança como `NO_SHOW`, e diferenças
+registram os valores Booking e OPERA em `OBSERVAÇÕES`.
+
 ## Limitações operacionais
 
 O runner precisa permanecer ligado, com usuário conectado, `run.cmd` ativo e
