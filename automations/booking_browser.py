@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from threading import Event
 from time import monotonic, sleep
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import urlsplit
 
 from DrissionPage import Chromium, ChromiumOptions
 from DrissionPage.errors import ContextLostError, ElementLostError, NoRectError
 
-from automations.booking_domain import checkpoint, normalize
+from automations.booking_domain import checkpoint
 from automations.booking_models import AutomationCancelled, BookingConfig
 
 POLL_INTERVAL = 0.25
@@ -49,19 +50,6 @@ BOOKING_PASSWORD_SELECTORS = (
     'css:input[name="password"]',
     'css:input[type="password"]',
     'css:input[autocomplete="current-password"]',
-)
-COLUMN_MODAL_SELECTORS = (
-    'css:[role="dialog"]',
-    'css:[role="menu"]',
-    'css:[data-test-id*="column"]',
-    'xpath://*[normalize-space()="Selecione as colunas" or normalize-space()="Select columns"]/ancestor::*[.//input[@type="checkbox"]][1]',
-    'xpath://*[normalize-space()="Selecione as colunas" or normalize-space()="Select columns"]/ancestor::*[.//*[@role="checkbox"]][1]',
-    'xpath://button[normalize-space()="Aplicar" or normalize-space()="Apply"]/ancestor::*[.//input[@type="checkbox"]][1]',
-    'xpath://button[normalize-space()="Aplicar" or normalize-space()="Apply"]/ancestor::*[.//*[@role="checkbox"]][1]',
-)
-COLUMN_CHECKBOX_SELECTORS = (
-    'css:input[type="checkbox"]',
-    'css:[role="checkbox"]',
 )
 COLUMN_BUTTON_XPATH = (
     "/html/body/div[1]/div/div[2]/div/div/div/main/div/div/"
@@ -224,14 +212,6 @@ if (!apply) return false;
 apply.click();
 return true;
 """
-APPLY_BUTTON_LABELS = ("aplicar", "apply", "concluir", "done", "salvar", "save")
-COLUMN_PANEL_SELECTOR = (
-    'xpath://*[normalize-space()="Select columns" or '
-    'normalize-space()="Selecione as colunas"]/'
-    'ancestor::*[.//button[normalize-space()="Apply" or '
-    'normalize-space()="Aplicar"]][1]'
-)
-
 USERNAME_SELECTOR = 'xpath://*[@id="idcs-signin-basic-signin-form-username"]'
 PASSWORD_SELECTOR = 'xpath://*[@id="idcs-signin-basic-signin-form-password|input"]'
 LOGIN_BUTTON_SELECTOR = 'xpath://*[@id="idcs-signin-basic-signin-form-submit"]/button'
@@ -488,112 +468,6 @@ def login_booking(browser: Chromium, config: BookingConfig, cancel: Event | None
         tab.wait.doc_loaded(timeout=60)
 
 
-def find_columns_modal(
-    tab: Any, cancel: Event | None, timeout: int = 30
-) -> Any:
-    deadline = monotonic() + timeout
-    while monotonic() < deadline:
-        checkpoint(cancel)
-        for candidate in tab.eles(COLUMN_PANEL_SELECTOR):
-            try:
-                if candidate.states.is_displayed:
-                    return candidate
-            except Exception:
-                continue
-        for selector in COLUMN_MODAL_SELECTORS:
-            for candidate in tab.eles(selector):
-                try:
-                    visible = candidate.states.is_displayed
-                    has_checkboxes = bool(find_column_checkboxes(candidate))
-                except Exception:
-                    continue
-                if visible and has_checkboxes:
-                    return candidate
-        try:
-            apply_button = find_apply_button(tab)
-        except RuntimeError:
-            apply_button = None
-        if apply_button:
-            for level in range(1, 9):
-                try:
-                    candidate = apply_button.parent(level)
-                    if find_column_checkboxes(candidate):
-                        return candidate
-                except Exception:
-                    continue
-        sleep(POLL_INTERVAL)
-    raise RuntimeError("Janela de seleção das colunas não encontrada.")
-
-
-def find_apply_button(modal: Any) -> Any:
-    for button in modal.eles("tag:button"):
-        try:
-            if (
-                button.states.is_displayed
-                and normalize(button.text).startswith(APPLY_BUTTON_LABELS)
-            ):
-                return button
-        except Exception:
-            continue
-    submit = modal.ele('css:button[type="submit"]', timeout=0)
-    if submit and submit.states.is_displayed:
-        return submit
-    raise RuntimeError('Botão "Aplicar/Apply" não encontrado.')
-
-
-def find_column_checkboxes(container: Any) -> list[Any]:
-    checkboxes: list[Any] = []
-    seen: set[int] = set()
-    for selector in COLUMN_CHECKBOX_SELECTORS:
-        for checkbox in container.eles(selector):
-            identity = id(checkbox)
-            if identity in seen:
-                continue
-            # A Booking estiliza o checkbox e mantém o input nativo oculto.
-            # O input ainda é válido e pode ser acionado com click(by_js=True).
-            checkboxes.append(checkbox)
-            seen.add(identity)
-    return checkboxes
-
-
-def select_column_checkbox(checkbox: Any) -> bool:
-    try:
-        enabled = checkbox.states.is_enabled
-    except Exception:
-        enabled = normalize(checkbox.attr("aria-disabled")) != "true"
-    try:
-        checked = checkbox.states.is_checked
-    except Exception:
-        checked = normalize(checkbox.attr("aria-checked")) == "true"
-    if enabled and not checked:
-        checkbox.click(by_js=True)
-        return True
-    return False
-
-
-def select_all_columns(modal: Any, cancel: Event | None) -> None:
-    checkpoint(cancel)
-    try:
-        modal.run_js(
-            """
-            const controls = this.querySelectorAll(
-                'input[type="checkbox"], [role="checkbox"]'
-            );
-            for (const control of controls) {
-                const disabled = control.disabled ||
-                    control.getAttribute('aria-disabled') === 'true';
-                const checked = control.checked ||
-                    control.getAttribute('aria-checked') === 'true';
-                if (!disabled && !checked) control.click();
-            }
-            """
-        )
-    except Exception:
-        for checkbox in find_column_checkboxes(modal):
-            checkpoint(cancel)
-            select_column_checkbox(checkbox)
-
-
 def wait_booking_report_ready(
     tab: Any, cancel: Event | None, timeout: int = BOOKING_REPORT_TIMEOUT
 ) -> None:
@@ -749,85 +623,6 @@ def booking_table(browser: Chromium, cancel: Event | None) -> tuple[list[str], l
     raise RuntimeError(
         "A página da Booking foi atualizada repetidamente durante a extração."
     )
-
-
-def wait_for_booking_rows(tab: Any, page_capacity: int | None, cancel: Event | None, *, clock: Callable[[], float] = monotonic, sleeper: Callable[[float], None] = sleep) -> tuple[Any, list[Any]]:
-    deadline = clock() + TABLE_TIMEOUT
-    previous_signature: tuple[str, ...] | None = None
-    stable_since = clock()
-    while clock() < deadline:
-        checkpoint(cancel)
-        table = tab.ele("css:table", timeout=5)
-        if not table:
-            sleeper(POLL_INTERVAL)
-            continue
-        rows = table.eles("css:tbody > tr")
-        signature = booking_rows_signature(table, rows)
-        if rows and page_capacity is not None and len(rows) >= page_capacity:
-            return table, rows
-        if rows and signature == previous_signature:
-            if clock() - stable_since >= TABLE_STABLE_SECONDS:
-                return table, rows
-        else:
-            previous_signature = signature
-            stable_since = clock()
-        sleeper(POLL_INTERVAL)
-    raise RuntimeError("A tabela de reservas não estabilizou dentro do prazo.")
-
-
-def booking_rows_signature(table: Any, fallback_rows: list[Any]) -> tuple[str, ...]:
-    try:
-        values = table.run_js(
-            """
-            return Array.from(this.querySelectorAll('tbody > tr'))
-                .map(row => (row.innerText || '').replace(/\u00a0/g, ' ').trim());
-            """
-        )
-        if isinstance(values, list):
-            return tuple(str(value) for value in values)
-    except (AttributeError, TypeError, RuntimeError):
-        pass
-    return tuple(row.text for row in fallback_rows)
-
-
-def booking_row_values(row: Any) -> list[str]:
-    values = []
-    for cell in row.eles("tag:td"):
-        checkbox = cell.ele('css:input[type="checkbox"]', timeout=0)
-        value = ("Sim" if checkbox.states.is_checked else "Não") if checkbox else cell.text.strip()
-        values.append(value.replace("\xa0", " "))
-    return values
-
-
-def extract_booking_table(
-    table: Any, fallback_rows: list[Any]
-) -> tuple[list[str], list[list[str]]]:
-    try:
-        values = table.run_js(
-            """
-            const clean = value => (value || '').replace(/\u00a0/g, ' ').trim();
-            const headers = Array.from(this.querySelectorAll('thead th'))
-                .map(cell => clean(cell.innerText));
-            const rows = Array.from(this.querySelectorAll('tbody > tr')).map(row =>
-                Array.from(row.querySelectorAll('td')).map(cell => {
-                    const checkbox = cell.querySelector('input[type="checkbox"]');
-                    return checkbox ? (checkbox.checked ? 'Sim' : 'Não')
-                        : clean(cell.innerText);
-                })
-            );
-            return [headers, rows];
-            """
-        )
-        headers, records = values
-        if headers and records:
-            return (
-                [str(header).strip() for header in headers],
-                [[str(value).replace("\xa0", " ") for value in row] for row in records],
-            )
-    except (TypeError, ValueError, RuntimeError):
-        pass
-    headers = [header.text.strip() for header in table.eles("css:thead th")]
-    return headers, [booking_row_values(row) for row in fallback_rows]
 
 
 def login_opera(browser: Chromium, config: BookingConfig, cancel: Event | None) -> Any:

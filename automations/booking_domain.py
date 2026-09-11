@@ -185,16 +185,6 @@ def should_compare(record: dict[str, str], columns: dict[str, str | None]) -> bo
     )
 
 
-def grouped_under_same_guest(
-    record: dict[str, str], columns: dict[str, str | None]
-) -> bool:
-    guest_key = columns.get("guest")
-    if not guest_key:
-        return False
-    guests = normalized_lines(record.get(guest_key, ""))
-    return len(guests) > 1 and len(set(guests)) == 1
-
-
 def calculate_booking_total(
     record: dict[str, str], columns: dict[str, str | None]
 ) -> Decimal:

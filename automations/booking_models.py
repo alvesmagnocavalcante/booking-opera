@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
-from typing import Any, Callable
+from typing import Any
 
 BOOKING_URL = (
     "https://admin.booking.com/hotel/hoteladmin/extranet_ng/"

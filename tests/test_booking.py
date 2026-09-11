@@ -3,21 +3,21 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
-from automations import booking as booking_module
 from automations import booking_browser
-from automations.booking_domain import consolidate_grouped_record
-from automations.booking import (
+from automations.booking import run
+from automations.booking_domain import (
+    compare_records,
+    consolidate_grouped_record,
+    parse_currency,
+    should_compare,
+    source_columns,
+)
+from automations.booking_models import (
+    BOOKING_URL,
     BookingConfig,
     BookingDependencies,
     BookingResult,
-    compare_records,
-    parse_currency,
-    run,
-    should_compare,
-    source_columns,
-    wait_for_booking_rows,
 )
-from automations.booking_models import BOOKING_URL
 
 
 class BookingTests(TestCase):
@@ -109,72 +109,6 @@ class BookingTests(TestCase):
 
         self.assertIsInstance(tab, Tab)
         self.assertIsInstance(field, Field)
-
-    def test_columns_modal_and_apply_button_accept_english_labels(self):
-        class States:
-            is_displayed = True
-
-        class HiddenStates:
-            is_displayed = False
-
-        class Checkbox:
-            states = HiddenStates()
-
-        class Button:
-            states = States()
-            text = "Apply"
-
-        class Modal:
-            states = States()
-
-            def eles(self, selector):
-                if selector == 'css:input[type="checkbox"]':
-                    return [Checkbox()]
-                if selector == "tag:button":
-                    return [Button()]
-                return []
-
-            def ele(self, _selector, timeout=0):
-                return None
-
-        class Tab:
-            def __init__(self):
-                self.modal = Modal()
-
-            def eles(self, selector):
-                if selector == 'css:[role="dialog"]':
-                    return [self.modal]
-                return []
-
-        tab = Tab()
-        modal = booking_browser.find_columns_modal(tab, cancel=None)
-        apply_button = booking_browser.find_apply_button(modal)
-
-        self.assertIs(modal, tab.modal)
-        self.assertEqual(apply_button.text, "Apply")
-
-    def test_columns_panel_is_found_by_visible_title_and_apply_structure(self):
-        class States:
-            is_displayed = True
-
-        class Panel:
-            states = States()
-
-        class Tab:
-            def __init__(self):
-                self.panel = Panel()
-
-            def eles(self, selector):
-                if selector == booking_browser.COLUMN_PANEL_SELECTOR:
-                    return [self.panel]
-                return []
-
-        tab = Tab()
-
-        self.assertIs(
-            booking_browser.find_columns_modal(tab, cancel=None),
-            tab.panel,
-        )
 
     def test_currency_formats(self):
         self.assertEqual(str(parse_currency("R$ 1.234,56")), "1234.56")
@@ -333,54 +267,6 @@ class BookingTests(TestCase):
         self.assertEqual(result.mismatch_count, 1)
         self.assertEqual(result.error_count, 1)
         self.assertEqual(result.not_compared_count, 1)
-
-    def test_table_wait_accepts_fewer_rows_than_page_capacity(self):
-        class Row:
-            text = "reserva 123"
-
-        class Table:
-            def eles(self, selector):
-                return [Row()] if selector == "css:tbody > tr" else []
-
-        class Tab:
-            def __init__(self):
-                self.table = Table()
-
-            def ele(self, _selector, timeout):
-                return self.table
-
-        clock = [0, 0, 0, 0, 0.5, 0.5, 2.1, 2.1]
-        with (
-            patch.object(booking_module, "monotonic", side_effect=clock),
-            patch.object(booking_module, "sleep"),
-        ):
-            table, rows = wait_for_booking_rows(Tab(), page_capacity=100, cancel=None)
-
-        self.assertIsInstance(table, Table)
-        self.assertEqual(len(rows), 1)
-
-    def test_table_stability_signature_is_read_in_one_operation(self):
-        class Table:
-            def __init__(self):
-                self.calls = 0
-
-            def run_js(self, _script):
-                self.calls += 1
-                return ["123\tGuest\tStayed", "456\tGuest 2\tCancelled"]
-
-        class Row:
-            @property
-            def text(self):
-                raise AssertionError("linhas não devem ser lidas individualmente")
-
-        table = Table()
-        signature = booking_browser.booking_rows_signature(table, [Row(), Row()])
-
-        self.assertEqual(
-            signature,
-            ("123\tGuest\tStayed", "456\tGuest 2\tCancelled"),
-        )
-        self.assertEqual(table.calls, 1)
 
     def test_select_hotel_uses_profile_search_and_first_result(self):
         class Field:
@@ -677,39 +563,6 @@ class BookingTests(TestCase):
         )
 
         self.assertLessEqual(fixed_delay, 1.5)
-
-    def test_batch_table_extraction_preserves_headers_and_multiline_values(self):
-        class Table:
-            def run_js(self, _script):
-                return [
-                    ["Book number", "Guest name", "Final amount (BRL)"],
-                    [["123", "Ana\nAna", "R$ 100,00\nR$ 200,00"]],
-                ]
-
-            def eles(self, _selector):
-                raise AssertionError("fallback individual não deveria ser usado")
-
-        headers, rows = booking_browser.extract_booking_table(Table(), [])
-
-        self.assertEqual(
-            headers,
-            ["Book number", "Guest name", "Final amount (BRL)"],
-        )
-        self.assertEqual(rows, [["123", "Ana\nAna", "R$ 100,00\nR$ 200,00"]])
-
-    def test_column_selection_is_executed_in_one_browser_operation(self):
-        class Modal:
-            def __init__(self):
-                self.scripts = []
-
-            def run_js(self, script):
-                self.scripts.append(script)
-
-        modal = Modal()
-        booking_browser.select_all_columns(modal, cancel=None)
-
-        self.assertEqual(len(modal.scripts), 1)
-        self.assertIn("control.click()", modal.scripts[0])
 
     def test_columns_panel_uses_exact_xpath_without_drission_search(self):
         class Tab:
