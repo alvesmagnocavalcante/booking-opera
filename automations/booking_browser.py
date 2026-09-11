@@ -31,6 +31,7 @@ OPERA_CLOSE_SETTLE_SECONDS = 0.1
 OPERA_BETWEEN_QUERIES_SECONDS = 0.1
 OPERA_RESULT_TIMEOUT = 10
 OPERA_RESULTS_STABLE_SECONDS = 0.5
+OPERA_RESULT_COUNT_GRACE_SECONDS = 2.0
 OPERA_QUERY_RETRIES = 3
 
 TRANSIENT_BROWSER_ERRORS = (ContextLostError, ElementLostError, NoRectError)
@@ -899,10 +900,18 @@ def wait_for_stable_opera_rate_count(
         checkpoint(cancel)
         count = len(find_all_visible_now(tab, RATE_LINK_SELECTOR))
         expected_count = opera_result_count(tab)
-        ready = count > 0 and (expected_count is None or count >= expected_count)
-        if ready and count == previous_count:
-            if monotonic() - stable_since >= OPERA_RESULTS_STABLE_SECONDS:
+        if count and count == previous_count:
+            stable_for = monotonic() - stable_since
+            if expected_count is None and stable_for >= OPERA_RESULTS_STABLE_SECONDS:
+                return count
+            if (
+                expected_count is not None
+                and count >= expected_count
+                and stable_for >= OPERA_RESULTS_STABLE_SECONDS
+            ):
                 return expected_count or count
+            if stable_for >= OPERA_RESULT_COUNT_GRACE_SECONDS:
+                return count
         else:
             previous_count = count
             stable_since = monotonic()

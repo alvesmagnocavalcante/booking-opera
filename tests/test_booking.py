@@ -420,6 +420,30 @@ class BookingTests(TestCase):
             (booking_browser.RESULT_COUNT_SELECTOR, 0),
         )
 
+    def test_opera_result_counter_mismatch_does_not_block_query(self):
+        current_time = 0.0
+
+        def clock():
+            nonlocal current_time
+            current_time += 0.25
+            return current_time
+
+        with (
+            patch.object(booking_browser, "monotonic", side_effect=clock),
+            patch.object(
+                booking_browser,
+                "find_all_visible_now",
+                return_value=[object()],
+            ),
+            patch.object(booking_browser, "opera_result_count", return_value=4),
+            patch.object(booking_browser, "sleep"),
+        ):
+            count = booking_browser.wait_for_stable_opera_rate_count(
+                object(), cancel=None
+            )
+
+        self.assertEqual(count, 1)
+
     def test_opera_dynamic_click_uses_semantic_fallback_without_waiting(self):
         class States:
             is_displayed = True
