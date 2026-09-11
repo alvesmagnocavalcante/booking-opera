@@ -42,7 +42,7 @@ jobs:
         run: uv sync --frozen
 
       - name: Executar conciliação
-        run: uv run python main.py --fail-on-divergence
+        run: uv run python main.py
 
       - name: Publicar relatórios
         if: ${{ always() }}

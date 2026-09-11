@@ -33,7 +33,7 @@ Requisitos: Python 3.12, `uv` e Chrome/Chromium compatível.
 Copy-Item .env.example .env
 # Carregue as variáveis da forma apropriada ao seu ambiente.
 uv sync
-uv run python main.py --output-dir output --fail-on-divergence
+uv run python main.py --output-dir output
 ```
 
 O navegador é visível por padrão (`BOOKING_HEADLESS=false`). A variável pode ser
@@ -45,18 +45,19 @@ alterada para `true` caso futuramente a execução visual deixe de ser necessár
 - `1`: configuração inválida ou falha geral da automação;
 - `2`: divergência/erro de reserva com `--fail-on-divergence`.
 
+O workflow padrão não usa `--fail-on-divergence`: divergências são publicadas no
+relatório sem marcar a execução como falha. Essa opção permanece disponível para
+uso local ou para pipelines que precisem bloquear diante de uma divergência.
+
 Os arquivos gerados em `output/` são:
 
 - `reservas_booking.csv`;
 - `conferencia_booking_opera.csv`;
 - `conferencia_booking_opera.xlsx`.
 
-O relatório final segue o modelo `Sheet0`, com as colunas `Reservation number`,
-`Booked on`, `Arrival`, `Departure`, `Guest name`, `Rooms`, `Persons`,
-`Room nights`, `Commission %`, valores, `Status` e `OBSERVAÇÕES`. Reservas
-agrupadas têm valores e quantidades somados. Cancelamentos sem cobrança são
-marcados como `CANCELLED`, no-shows sem cobrança como `NO_SHOW`, e diferenças
-registram os valores Booking e OPERA em `OBSERVAÇÕES`.
+O relatório final contém somente os dados necessários para auditar a
+conciliação: número da reserva, hóspede, valor Booking, valor OPERA, diferença,
+status e observações. Reservas agrupadas têm seus valores somados.
 
 ## Limitações operacionais
 

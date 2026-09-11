@@ -11,35 +11,14 @@ from automations.booking_models import AutomationCancelled, Progress
 COMPLETED_STATUSES = {"ok", "concluida", "completed", "stayed"}
 CURRENCY_PATTERN = re.compile(r"R\$\s*[\d.,]+")
 REPORT_HEADERS = (
-    "Reservation number",
-    "Booked on",
-    "Arrival",
-    "Departure",
-    "Guest name",
-    "Rooms",
-    "Persons",
-    "Room nights",
-    "Commission %",
-    "Original amount",
-    "Final amount",
-    "Commission amount",
+    "Número da reserva",
+    "Nome do hóspede",
+    "Valor Booking",
+    "Valor OPERA",
+    "Diferença",
     "Status",
-    "OBSERVAÇÕES",
+    "Observações",
 )
-MONTHS = {
-    "jan": "01",
-    "fev": "02",
-    "mar": "03",
-    "abr": "04",
-    "mai": "05",
-    "jun": "06",
-    "jul": "07",
-    "ago": "08",
-    "set": "09",
-    "out": "10",
-    "nov": "11",
-    "dez": "12",
-}
 
 
 def notify(progress: Progress | None, message: str, value: float) -> None:
@@ -271,30 +250,12 @@ def source_value(
     return str(record.get(header, "")).strip() if header else ""
 
 
-def iso_booking_date(value: str) -> str:
-    normalized = normalize(value)
-    match = re.fullmatch(r"(\d{1,2})o?\s+de\s+([a-z]{3})\.?\s+de\s+(\d{4})", normalized)
-    if not match or match.group(2) not in MONTHS:
-        return value
-    day, month, year = match.groups()
-    return f"{year}-{MONTHS[month]}-{int(day):02d}"
-
-
 def decimal_value(value: str) -> Decimal | str:
     if not value:
         return ""
     try:
         return parse_currency(value)
     except ValueError:
-        return value
-
-
-def number_value(value: str) -> Decimal | str:
-    if not value:
-        return ""
-    try:
-        return Decimal(value.replace(",", "."))
-    except InvalidOperation:
         return value
 
 
@@ -323,29 +284,19 @@ def final_report_record(
         token in source_status for token in ("nao comparecimento", "no show", "no_show")
     ):
         observation = "NO SHOW" if not observation else f"NO SHOW | {observation}"
-    elif status == "DIVERGENTE":
-        observation = (
-            f"Booking: {record.get('Valor Booking calculado', '')} | "
-            f"OPERA: {record.get('Valor OPERA', '')}"
-        )
     elif status.startswith("ERRO:"):
         observation = status.removeprefix("ERRO:").strip()
         status = "ERRO"
 
-    rooms = source_value(record, columns, "rooms") or record.get("Itens agrupados", "1")
+    booking_amount = str(record.get("Valor Booking calculado", "")) or source_value(
+        record, columns, "final"
+    )
     values = (
         source_value(record, columns, "reservation"),
-        source_value(record, columns, "booked_on"),
-        iso_booking_date(source_value(record, columns, "arrival")),
-        iso_booking_date(source_value(record, columns, "departure")),
         source_value(record, columns, "guest"),
-        number_value(str(rooms)),
-        number_value(source_value(record, columns, "persons")),
-        number_value(source_value(record, columns, "nights")),
-        number_value(source_value(record, columns, "commission_percent")),
-        decimal_value(source_value(record, columns, "original")),
-        decimal_value(source_value(record, columns, "final")),
-        decimal_value(source_value(record, columns, "commission")),
+        decimal_value(booking_amount),
+        decimal_value(str(record.get("Valor OPERA", ""))),
+        decimal_value(str(record.get("Diferença", ""))),
         status,
         observation,
     )

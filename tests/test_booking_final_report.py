@@ -59,11 +59,10 @@ class FinalReportTests(TestCase):
         report = final_report_record(record, columns)
 
         self.assertEqual(tuple(report), REPORT_HEADERS)
-        self.assertEqual(report["Reservation number"], "123")
-        self.assertEqual(report["Arrival"], "2026-06-01")
-        self.assertEqual(report["Departure"], "2026-06-02")
-        self.assertEqual(str(report["Rooms"]), "1")
-        self.assertEqual(str(report["Final amount"]), "100.00")
+        self.assertEqual(report["Número da reserva"], "123")
+        self.assertEqual(report["Nome do hóspede"], "Ana")
+        self.assertEqual(str(report["Valor Booking"]), "100.00")
+        self.assertEqual(str(report["Valor OPERA"]), "100.00")
         self.assertEqual(report["Status"], "OK")
 
     def test_maps_uncharged_statuses(self):
@@ -75,7 +74,7 @@ class FinalReportTests(TestCase):
         self.assertEqual(final_report_record(no_show, columns)["Status"], "NO_SHOW")
         self.assertEqual(final_report_record(cancelled, columns)["Status"], "CANCELLED")
 
-    def test_divergence_records_both_values_in_observation(self):
+    def test_divergence_keeps_values_in_dedicated_columns(self):
         record, columns = self.record()
         record.update(
             {
@@ -88,7 +87,9 @@ class FinalReportTests(TestCase):
         report = final_report_record(record, columns)
 
         self.assertEqual(report["Status"], "DIVERGENTE")
-        self.assertEqual(report["OBSERVAÇÕES"], "Booking: R$ 100,00 | OPERA: R$ 80,00")
+        self.assertEqual(str(report["Valor Booking"]), "100.00")
+        self.assertEqual(str(report["Valor OPERA"]), "80.00")
+        self.assertEqual(report["Observações"], "")
 
     def test_excel_uses_sheet0_layout_and_numeric_currency(self):
         record, columns = self.record()
@@ -98,11 +99,10 @@ class FinalReportTests(TestCase):
             path = Path(directory) / "report.xlsx"
             save_report_excel(path, REPORT_HEADERS, [report])
             workbook = load_workbook(path, data_only=False)
-            sheet = workbook["Sheet0"]
+            sheet = workbook["Conferência"]
 
-            self.assertEqual(sheet["A1"].value, "COMISSÕES BOOKING × OPERA")
-            self.assertEqual(sheet["A2"].value, "Reservation number")
-            self.assertEqual(sheet["N2"].value, "OBSERVAÇÕES")
-            self.assertEqual(sheet["K3"].value, 100)
-            self.assertEqual(sheet["M3"].value, "OK")
-            self.assertIn("A1:N1", sheet.merged_cells)
+            self.assertEqual(sheet["A1"].value, "Número da reserva")
+            self.assertEqual(sheet["G1"].value, "Observações")
+            self.assertEqual(sheet["C2"].value, 100)
+            self.assertEqual(sheet["F2"].value, "OK")
+            self.assertFalse(sheet.merged_cells.ranges)
