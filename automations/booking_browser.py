@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Callable
 from threading import Event
 from time import monotonic, sleep
@@ -245,6 +246,12 @@ SEARCH_MODE_SELECTOR = 'xpath://*[@id="pt1:oc_pg_pt:mainRegion:1:pt1:oc_srch_tmp
 RESERVATION_INPUT_SELECTOR = 'xpath://*[@id="pt1:oc_pg_pt:mainRegion:1:pt1:oc_srch_tmpl_167b9q:ode_bscrn_tmpl:oc_srch_swtchr:odec_srch_swtchr_bsc_ts:odec_ts_sbfrm:odec_ts_inpt::content"]'
 SEARCH_BUTTON_SELECTOR = 'xpath://*[@id="pt1:oc_pg_pt:mainRegion:1:pt1:oc_srch_tmpl_167b9q:ode_bscrn_tmpl:oc_srch_swtchr:odec_srch_swtchr_bsc_ts:odec_ts_sbfrm:odec_ts_srch"]'
 RATE_LINK_SELECTOR = 'xpath://*[contains(@id, "oc_srch_rslts_tbl_tmpl") and contains(@id, ":ca3:occ_crncy_amt_lnk::text")]'
+RESULT_COUNT_SELECTOR = (
+    "xpath:/html/body/div[1]/form/span[2]/span[2]/span[2]/div[2]/table/"
+    "tbody/tr/td[2]/div/div[1]/div[3]/div/div[2]/div/span[2]/span/span[5]/"
+    "div/div/div/div/div/div[1]/div[5]/span/span[2]/span/div/div[2]/div/"
+    "div[1]/div/div/table/tbody/tr/td[2]"
+)
 TOTAL_VALUE_SELECTOR = 'xpath://*[contains(@id, "oc_srch_rslts_tbl_tmpl") and contains(@id, ":CurrencyAmount245:occ_crncy_amt")]'
 CLOSE_RATE_SELECTOR = 'xpath://*[contains(@id, "oc_srch_rslts_tbl_tmpl") and contains(@id, ":oc_pnl_axnbr:odec_axn_br_axns_pstv")]'
 CLOSE_RATE_SELECTORS = (
@@ -891,14 +898,29 @@ def wait_for_stable_opera_rate_count(
     while monotonic() < deadline:
         checkpoint(cancel)
         count = len(find_all_visible_now(tab, RATE_LINK_SELECTOR))
-        if count and count == previous_count:
+        expected_count = opera_result_count(tab)
+        ready = count > 0 and (expected_count is None or count >= expected_count)
+        if ready and count == previous_count:
             if monotonic() - stable_since >= OPERA_RESULTS_STABLE_SECONDS:
-                return count
+                return expected_count or count
         else:
             previous_count = count
             stable_since = monotonic()
         sleep(POLL_INTERVAL)
     raise RuntimeError("Os resultados da reserva não terminaram de carregar.")
+
+
+def opera_result_count(tab: Any) -> int | None:
+    """Read OPERA's own result counter, such as ``4 results``."""
+
+    element = find_visible_now(tab, RESULT_COUNT_SELECTOR)
+    if element is None:
+        return None
+    try:
+        match = re.search(r"\d+", str(element.text or ""))
+    except TRANSIENT_BROWSER_ERRORS:
+        return None
+    return int(match.group()) if match else None
 
 
 def wait_for_opera_rate(

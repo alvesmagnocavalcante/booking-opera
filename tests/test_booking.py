@@ -399,6 +399,27 @@ class BookingTests(TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(tab.timeout, 0)
 
+    def test_opera_reads_expected_result_count(self):
+        class States:
+            is_displayed = True
+
+        class Counter:
+            states = States()
+            text = "4 results"
+
+        class Tab:
+            def eles(self, selector, *, timeout):
+                self.query = (selector, timeout)
+                return [Counter()]
+
+        tab = Tab()
+
+        self.assertEqual(booking_browser.opera_result_count(tab), 4)
+        self.assertEqual(
+            tab.query,
+            (booking_browser.RESULT_COUNT_SELECTOR, 0),
+        )
+
     def test_opera_dynamic_click_uses_semantic_fallback_without_waiting(self):
         class States:
             is_displayed = True
