@@ -444,6 +444,20 @@ class BookingTests(TestCase):
 
         self.assertEqual(count, 1)
 
+    def test_opera_waits_for_previous_detail_to_close(self):
+        with (
+            patch.object(
+                booking_browser,
+                "find_visible_now",
+                side_effect=[object(), object(), None],
+            ) as find_detail,
+            patch.object(booking_browser, "sleep") as wait,
+        ):
+            booking_browser.wait_for_opera_detail_closed(object(), cancel=None)
+
+        self.assertEqual(find_detail.call_count, 3)
+        self.assertEqual(wait.call_count, 2)
+
     def test_opera_dynamic_click_uses_semantic_fallback_without_waiting(self):
         class States:
             is_displayed = True

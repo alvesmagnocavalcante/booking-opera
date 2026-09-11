@@ -950,6 +950,22 @@ def wait_for_opera_rate(
     raise RuntimeError(f"Resultado {index + 1} da reserva não ficou disponível.")
 
 
+def wait_for_opera_detail_closed(
+    tab: Any,
+    cancel: Event | None,
+    timeout: int = OPERA_RESULT_TIMEOUT,
+) -> None:
+    """Wait until the previous rate detail is gone before clicking another row."""
+
+    deadline = monotonic() + timeout
+    while monotonic() < deadline:
+        checkpoint(cancel)
+        if find_visible_now(tab, TOTAL_VALUE_SELECTOR) is None:
+            return
+        sleep(POLL_INTERVAL)
+    raise RuntimeError("O detalhe do resultado anterior não fechou dentro do prazo.")
+
+
 def wait_for_opera_text(
     tab: Any,
     selector: str,
@@ -1045,14 +1061,19 @@ def _opera_total_once(
         except NoRectError:
             rate_link.click(by_js=True)
         sleep(OPERA_DETAIL_SETTLE_SECONDS)
-        totals.append(
-            wait_for_opera_text(
-                tab,
-                TOTAL_VALUE_SELECTOR,
-                "Valor total da reserva",
-                cancel,
+        try:
+            totals.append(
+                wait_for_opera_text(
+                    tab,
+                    TOTAL_VALUE_SELECTOR,
+                    "Valor total da reserva",
+                    cancel,
+                )
             )
-        )
+        except RuntimeError as error:
+            raise RuntimeError(
+                f"Resultado {index + 1}/{rate_count}: {error}"
+            ) from error
         click_opera_dynamic_any(
             tab,
             CLOSE_RATE_SELECTORS,
@@ -1060,6 +1081,7 @@ def _opera_total_once(
             cancel,
             settle_seconds=OPERA_CLOSE_SETTLE_SECONDS,
         )
+        wait_for_opera_detail_closed(tab, cancel)
     find_visible(
         tab,
         RESERVATION_INPUT_SELECTOR,
