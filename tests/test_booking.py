@@ -492,6 +492,47 @@ class BookingTests(TestCase):
         self.assertEqual(lookup.call_count, 2)
         recover.assert_called_once()
 
+    def test_opera_total_sums_every_result_for_grouped_reservation(self):
+        class RateLink:
+            def __init__(self):
+                self.clicks = 0
+
+            def click(self, *, by_js=False):
+                self.clicks += 1
+
+        rate_links = [RateLink(), RateLink(), RateLink()]
+        with (
+            patch.object(booking_browser, "find_visible_now", return_value=None),
+            patch.object(booking_browser, "find_visible", return_value=object()),
+            patch.object(booking_browser, "fill_opera_reservation"),
+            patch.object(booking_browser, "click_opera_dynamic"),
+            patch.object(booking_browser, "wait_for_new_opera_result"),
+            patch.object(
+                booking_browser,
+                "wait_for_stable_opera_rate_count",
+                return_value=3,
+            ),
+            patch.object(
+                booking_browser,
+                "wait_for_opera_rate",
+                side_effect=rate_links,
+            ),
+            patch.object(
+                booking_browser,
+                "wait_for_opera_text",
+                side_effect=["R$ 1.657,92", "R$ 1.326,17", "R$ 1.326,17"],
+            ),
+            patch.object(booking_browser, "click_opera_dynamic_any") as close,
+            patch.object(booking_browser, "sleep"),
+        ):
+            total = booking_browser._opera_total_once(
+                object(), "6269919006", cancel=None
+            )
+
+        self.assertEqual(parse_currency(total), parse_currency("R$ 4.310,26"))
+        self.assertEqual([link.clicks for link in rate_links], [1, 1, 1])
+        self.assertEqual(close.call_count, 3)
+
     def test_opera_waits_until_previous_result_is_invalidated(self):
         class PreviousStates:
             def __init__(self):

@@ -29,6 +29,7 @@ OPERA_DETAIL_SETTLE_SECONDS = 0.1
 OPERA_CLOSE_SETTLE_SECONDS = 0.1
 OPERA_BETWEEN_QUERIES_SECONDS = 0.1
 OPERA_RESULT_TIMEOUT = 10
+OPERA_RESULTS_STABLE_SECONDS = 0.5
 OPERA_QUERY_RETRIES = 3
 
 TRANSIENT_BROWSER_ERRORS = (ContextLostError, ElementLostError, NoRectError)
@@ -753,17 +754,24 @@ def wait_for_text(
 def find_visible_now(tab: Any, selector: str) -> Any | None:
     """Return a fresh visible element without waiting."""
 
+    return next(iter(find_all_visible_now(tab, selector)), None)
+
+
+def find_all_visible_now(tab: Any, selector: str) -> list[Any]:
+    """Return a fresh snapshot of visible elements without implicit waits."""
+
     try:
         elements = tab.eles(selector, timeout=0)
     except TRANSIENT_BROWSER_ERRORS:
-        return None
+        return []
+    visible = []
     for element in elements:
         try:
             if element.states.is_displayed:
-                return element
+                visible.append(element)
         except TRANSIENT_BROWSER_ERRORS:
             continue
-    return None
+    return visible
 
 
 def click_opera_dynamic(
@@ -870,6 +878,47 @@ def wait_for_new_opera_result(
     raise RuntimeError("O resultado da nova reserva não terminou de carregar.")
 
 
+def wait_for_stable_opera_rate_count(
+    tab: Any,
+    cancel: Event | None,
+    timeout: int = OPERA_RESULT_TIMEOUT,
+) -> int:
+    """Wait until every OPERA result row has finished rendering."""
+
+    deadline = monotonic() + timeout
+    previous_count = 0
+    stable_since = monotonic()
+    while monotonic() < deadline:
+        checkpoint(cancel)
+        count = len(find_all_visible_now(tab, RATE_LINK_SELECTOR))
+        if count and count == previous_count:
+            if monotonic() - stable_since >= OPERA_RESULTS_STABLE_SECONDS:
+                return count
+        else:
+            previous_count = count
+            stable_since = monotonic()
+        sleep(POLL_INTERVAL)
+    raise RuntimeError("Os resultados da reserva não terminaram de carregar.")
+
+
+def wait_for_opera_rate(
+    tab: Any,
+    index: int,
+    cancel: Event | None,
+    timeout: int = OPERA_RESULT_TIMEOUT,
+) -> Any:
+    """Reacquire a result link after OPERA rebuilds the results table."""
+
+    deadline = monotonic() + timeout
+    while monotonic() < deadline:
+        checkpoint(cancel)
+        rate_links = find_all_visible_now(tab, RATE_LINK_SELECTOR)
+        if index < len(rate_links):
+            return rate_links[index]
+        sleep(POLL_INTERVAL)
+    raise RuntimeError(f"Resultado {index + 1} da reserva não ficou disponível.")
+
+
 def wait_for_opera_text(
     tab: Any,
     selector: str,
@@ -950,30 +999,36 @@ def _opera_total_once(
         cancel,
         settle_seconds=0,
     )
-    rate_link = wait_for_new_opera_result(
+    wait_for_new_opera_result(
         tab,
         previous_rate,
         cancel,
         previous_signature=previous_signature,
     )
-    try:
-        rate_link.click()
-    except NoRectError:
-        rate_link.click(by_js=True)
-    sleep(OPERA_DETAIL_SETTLE_SECONDS)
-    total = wait_for_opera_text(
-        tab,
-        TOTAL_VALUE_SELECTOR,
-        "Valor total da reserva",
-        cancel,
-    )
-    click_opera_dynamic_any(
-        tab,
-        CLOSE_RATE_SELECTORS,
-        "Fechar detalhes da tarifa",
-        cancel,
-        settle_seconds=OPERA_CLOSE_SETTLE_SECONDS,
-    )
+    rate_count = wait_for_stable_opera_rate_count(tab, cancel)
+    totals = []
+    for index in range(rate_count):
+        rate_link = wait_for_opera_rate(tab, index, cancel)
+        try:
+            rate_link.click()
+        except NoRectError:
+            rate_link.click(by_js=True)
+        sleep(OPERA_DETAIL_SETTLE_SECONDS)
+        totals.append(
+            wait_for_opera_text(
+                tab,
+                TOTAL_VALUE_SELECTOR,
+                "Valor total da reserva",
+                cancel,
+            )
+        )
+        click_opera_dynamic_any(
+            tab,
+            CLOSE_RATE_SELECTORS,
+            "Fechar detalhes da tarifa",
+            cancel,
+            settle_seconds=OPERA_CLOSE_SETTLE_SECONDS,
+        )
     find_visible(
         tab,
         RESERVATION_INPUT_SELECTOR,
@@ -982,7 +1037,7 @@ def _opera_total_once(
         timeout=30,
     )
     sleep(OPERA_BETWEEN_QUERIES_SECONDS)
-    return total
+    return "\n".join(totals)
 
 
 def opera_total(tab: Any, reservation: str, cancel: Event | None) -> str:
