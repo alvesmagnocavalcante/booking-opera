@@ -597,7 +597,6 @@ class BookingTests(TestCase):
                 ],
             ) as lookup,
             patch.object(booking_browser, "recover_opera_search") as recover,
-            patch.object(booking_browser, "sleep"),
         ):
             total = booking_browser.opera_total(
                 object(), "5618549915", cancel=None
@@ -606,72 +605,6 @@ class BookingTests(TestCase):
         self.assertEqual(total, "R$ 1.234,56")
         self.assertEqual(lookup.call_count, 2)
         recover.assert_called_once()
-
-    def test_opera_error_from_replaced_element_is_translated(self):
-        with (
-            patch.object(
-                booking_browser,
-                "_opera_total_once",
-                side_effect=booking_browser.ElementLostError(),
-            ),
-            patch.object(booking_browser, "recover_opera_search"),
-            patch.object(booking_browser, "sleep"),
-        ):
-            with self.assertRaisesRegex(
-                RuntimeError, "página atualizou e substituiu os elementos"
-            ):
-                booking_browser.opera_total(object(), "123", cancel=None)
-
-    def test_recovery_reopens_reservation_search_after_full_refresh(self):
-        tab = object()
-        recovered_field = object()
-        with (
-            patch.object(booking_browser, "find_visible_now", return_value=None),
-            patch.object(
-                booking_browser,
-                "find_visible",
-                side_effect=[RuntimeError("ausente"), recovered_field],
-            ) as find,
-            patch.object(booking_browser, "click_opera_dynamic_any"),
-            patch.object(booking_browser, "open_reservations") as reopen,
-            patch.object(booking_browser, "sleep"),
-        ):
-            booking_browser.recover_opera_search(tab, cancel=None)
-
-        reopen.assert_called_once_with(tab, None)
-        self.assertEqual(find.call_count, 2)
-
-    def test_opera_result_waits_for_requested_reservation(self):
-        class States:
-            is_alive = False
-            is_displayed = False
-
-        class Previous:
-            states = States()
-
-        current = object()
-        with (
-            patch.object(
-                booking_browser, "find_visible_now", return_value=current
-            ),
-            patch.object(
-                booking_browser,
-                "opera_result_signature",
-                side_effect=[
-                    "9999999999 Hóspede anterior R$ 100,00",
-                    "1234567890 Novo hóspede R$ 200,00",
-                ],
-            ),
-            patch.object(booking_browser, "sleep"),
-        ):
-            result = booking_browser.wait_for_new_opera_result(
-                object(),
-                Previous(),
-                cancel=None,
-                expected_reservation="1234567890",
-            )
-
-        self.assertIs(result, current)
 
     def test_opera_waits_until_previous_result_is_invalidated(self):
         class PreviousStates:

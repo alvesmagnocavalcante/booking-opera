@@ -27,9 +27,8 @@ OPERA_INPUT_SETTLE_SECONDS = 1.0
 OPERA_DETAIL_SETTLE_SECONDS = 0.1
 OPERA_CLOSE_SETTLE_SECONDS = 0.1
 OPERA_BETWEEN_QUERIES_SECONDS = 0.1
-OPERA_RESULT_TIMEOUT = 30
-OPERA_QUERY_RETRIES = 4
-OPERA_RETRY_BACKOFF_SECONDS = 1.0
+OPERA_RESULT_TIMEOUT = 10
+OPERA_QUERY_RETRIES = 3
 
 TRANSIENT_BROWSER_ERRORS = (ContextLostError, ElementLostError, NoRectError)
 OPERA_RETRYABLE_ERRORS = (*TRANSIENT_BROWSER_ERRORS, RuntimeError)
@@ -1045,10 +1044,9 @@ def wait_for_new_opera_result(
     previous: Any | None,
     cancel: Event | None,
     previous_signature: str = "",
-    expected_reservation: str | None = None,
     timeout: int = OPERA_RESULT_TIMEOUT,
 ) -> Any:
-    """Wait until OPERA loads the result row for the requested reservation."""
+    """Wait until OPERA replaces the element or changes the result row."""
 
     deadline = monotonic() + timeout
     previous_invalidated = previous is None
@@ -1056,20 +1054,10 @@ def wait_for_new_opera_result(
         checkpoint(cancel)
         current = find_visible_now(tab, RATE_LINK_SELECTOR)
         current_signature = opera_result_signature(tab) if current else ""
-        expected_loaded = bool(
-            expected_reservation
-            and normalize(expected_reservation) in normalize(current_signature)
-        )
         if (
             current is not None
             and current_signature
-            and (
-                expected_loaded
-                or (
-                    expected_reservation is None
-                    and current_signature != previous_signature
-                )
-            )
+            and current_signature != previous_signature
         ):
             return current
         if not previous_invalidated:
@@ -1081,7 +1069,7 @@ def wait_for_new_opera_result(
             except TRANSIENT_BROWSER_ERRORS:
                 previous_invalidated = True
         if previous_invalidated:
-            if current is not None and expected_reservation is None:
+            if current is not None:
                 return current
         sleep(POLL_INTERVAL)
     raise RuntimeError("O resultado da nova reserva não terminou de carregar.")
@@ -1112,13 +1100,9 @@ def wait_for_opera_text(
 
 
 def recover_opera_search(tab: Any, cancel: Event | None) -> None:
-    """Restore the reservation search after an OPERA partial or full refresh."""
+    """Best-effort return to the reservation search after a partial refresh."""
 
     checkpoint(cancel)
-    try:
-        tab.wait.doc_loaded(timeout=30)
-    except (AttributeError, RuntimeError, *TRANSIENT_BROWSER_ERRORS):
-        pass
     try:
         click_opera_dynamic_any(
             tab,
@@ -1130,25 +1114,16 @@ def recover_opera_search(tab: Any, cancel: Event | None) -> None:
     except (RuntimeError, *TRANSIENT_BROWSER_ERRORS):
         pass
     sleep(OPERA_ACTION_SETTLE_SECONDS)
-    if find_visible_now(tab, RESERVATION_INPUT_SELECTOR) is not None:
-        return
     try:
         find_visible(
             tab,
             RESERVATION_INPUT_SELECTOR,
             "Campo de pesquisa da reserva",
             cancel,
-            timeout=10,
+            timeout=15,
         )
     except RuntimeError:
-        open_reservations(tab, cancel)
-        find_visible(
-            tab,
-            RESERVATION_INPUT_SELECTOR,
-            "Campo de pesquisa da reserva após recuperação",
-            cancel,
-            timeout=30,
-        )
+        pass
 
 
 def fill_opera_reservation(field: Any, reservation: str) -> None:
@@ -1185,7 +1160,6 @@ def _opera_total_once(
         previous_rate,
         cancel,
         previous_signature=previous_signature,
-        expected_reservation=reservation,
     )
     try:
         rate_link.click()
@@ -1218,24 +1192,15 @@ def _opera_total_once(
 
 def opera_total(tab: Any, reservation: str, cancel: Event | None) -> str:
     last_error: Exception | None = None
-    for attempt in range(OPERA_QUERY_RETRIES):
+    for _attempt in range(OPERA_QUERY_RETRIES):
         try:
             return _opera_total_once(tab, reservation, cancel)
         except AutomationCancelled:
             raise
         except OPERA_RETRYABLE_ERRORS as error:
             last_error = error
-            if attempt + 1 < OPERA_QUERY_RETRIES:
-                try:
-                    recover_opera_search(tab, cancel)
-                except OPERA_RETRYABLE_ERRORS as recovery_error:
-                    last_error = recovery_error
-                sleep(OPERA_RETRY_BACKOFF_SECONDS * (attempt + 1))
-    if isinstance(last_error, ElementLostError):
-        detail = "a página atualizou e substituiu os elementos da consulta"
-    else:
-        detail = str(last_error).strip() or type(last_error).__name__
+            recover_opera_search(tab, cancel)
     raise RuntimeError(
         f"OPERA não estabilizou após {OPERA_QUERY_RETRIES} tentativas: "
-        f"{detail}"
+        f"{last_error}"
     )
