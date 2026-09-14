@@ -173,22 +173,42 @@ def should_compare(record: dict[str, str], columns: dict[str, str | None]) -> bo
     status = normalize(raw_status)
     notes_key = columns["notes"]
     notes = normalize(record.get(str(notes_key), "")) if notes_key else ""
-    cancelled = any(
-        token in status
-        for token in ("cancel", "nao comparecimento", "no show", "no_show")
-    ) or any(
-        token in notes for token in ("chargeable cancellation", "no show", "no_show")
+    cancelled = "cancel" in status or "chargeable cancellation" in notes
+    no_show = any(
+        token in status or token in notes
+        for token in ("nao comparecimento", "no show", "no_show")
     )
-    return cancelled and all(
-        parse_currency(record[str(columns[key])]) > 0
-        for key in ("original", "final", "commission")
+    commission_charged = has_positive_amount(record, columns, "commission")
+    if cancelled:
+        return commission_charged and (
+            has_positive_amount(record, columns, "final")
+            or has_positive_amount(record, columns, "original")
+        )
+    return no_show and commission_charged and has_positive_amount(
+        record, columns, "final"
     )
+
+
+def has_positive_amount(
+    record: dict[str, str], columns: dict[str, str | None], key: str
+) -> bool:
+    try:
+        return parse_currency(record[str(columns[key])]) > 0
+    except ValueError:
+        return False
 
 
 def calculate_booking_total(
     record: dict[str, str], columns: dict[str, str | None]
 ) -> Decimal:
-    return parse_currency(record[str(columns["final"])])
+    try:
+        final_amount = parse_currency(record[str(columns["final"])])
+    except ValueError:
+        final_amount = Decimal("0")
+    status = normalize(record[str(columns["status"])])
+    if final_amount <= 0 and "cancel" in status:
+        return parse_currency(record[str(columns["original"])])
+    return final_amount
 
 
 def consolidate_grouped_record(

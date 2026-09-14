@@ -129,6 +129,66 @@ class BookingTests(TestCase):
         ]))
         self.assertTrue(should_compare(row, columns))
 
+    def test_cancelled_reservation_with_commission_is_compared(self):
+        headers = [
+            "Número da reserva",
+            "Nome do hóspede",
+            "Status",
+            "Valor original",
+            "Valor final",
+            "Valor de comissão",
+            "Observações",
+        ]
+        columns = source_columns(headers)
+        record = dict(
+            zip(
+                headers,
+                [
+                    "5710213267",
+                    "Rennan Italo",
+                    "CANCELLED",
+                    "R$ 1.286,70",
+                    "R$ -",
+                    "R$ 231,61",
+                    "",
+                ],
+            )
+        )
+
+        self.assertTrue(should_compare(record, columns))
+        compare_records([record], columns, lambda _reservation: "R$ 1.286,70")
+
+        self.assertEqual(record["Valor Booking calculado"], "R$ 1.286,70")
+        self.assertEqual(record["Conferência"], "OK")
+
+    def test_cancelled_reservation_without_commission_is_not_compared(self):
+        headers = [
+            "Número da reserva",
+            "Nome do hóspede",
+            "Status",
+            "Valor original",
+            "Valor final",
+            "Valor de comissão",
+            "Observações",
+        ]
+        columns = source_columns(headers)
+        record = dict(
+            zip(
+                headers,
+                [
+                    "5126508511",
+                    "Deborah Barbosa",
+                    "CANCELLED",
+                    "R$ 4.029,98",
+                    "R$ -",
+                    "R$ -",
+                    "",
+                ],
+            )
+        )
+
+        self.assertFalse(should_compare(record, columns))
+
     def test_english_booking_headers_and_status_are_supported(self):
         headers = [
             "Book number",
