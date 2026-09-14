@@ -62,6 +62,7 @@ class FinalReportTests(TestCase):
         self.assertEqual(report["Número da reserva"], "123")
         self.assertEqual(report["Nome do hóspede"], "Ana")
         self.assertEqual(str(report["Valor Booking"]), "100.00")
+        self.assertEqual(str(report["Comissão Booking"]), "16.00")
         self.assertEqual(str(report["Valor OPERA"]), "100.00")
         self.assertEqual(report["Status"], "OK")
 
@@ -102,7 +103,10 @@ class FinalReportTests(TestCase):
             sheet = workbook["Conferência"]
 
             self.assertEqual(sheet["A1"].value, "Número da reserva")
-            self.assertEqual(sheet["G1"].value, "Observações")
+            self.assertEqual(sheet["D1"].value, "Comissão Booking")
+            self.assertEqual(sheet["H1"].value, "Observações")
             self.assertEqual(sheet["C2"].value, 100)
-            self.assertEqual(sheet["F2"].value, "OK")
+            self.assertEqual(sheet["D2"].value, 16)
+            self.assertEqual(sheet["D2"].number_format, '"R$" #,##0.00')
+            self.assertEqual(sheet["G2"].value, "OK")
             self.assertFalse(sheet.merged_cells.ranges)

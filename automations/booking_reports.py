@@ -38,7 +38,7 @@ def save_report_excel(
     for cell in sheet[1]:
         cell.font = Font(color="FFFFFF", bold=True)
         cell.fill = fill
-    for row in sheet.iter_rows(min_row=2, min_col=3, max_col=5):
+    for row in sheet.iter_rows(min_row=2, min_col=3, max_col=6):
         for cell in row:
             cell.number_format = '"R$" #,##0.00'
     sheet.freeze_panes = "A2"

@@ -56,8 +56,9 @@ Os arquivos gerados em `output/` são:
 - `conferencia_booking_opera.xlsx`.
 
 O relatório final contém somente os dados necessários para auditar a
-conciliação: número da reserva, hóspede, valor Booking, valor OPERA, diferença,
-status e observações. Reservas agrupadas têm seus valores somados.
+conciliação: número da reserva, hóspede, valor Booking, comissão Booking,
+valor OPERA, diferença, status e observações. Reservas agrupadas têm seus valores
+somados.
 
 ## Limitações operacionais
 
